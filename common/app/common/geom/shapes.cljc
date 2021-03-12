@@ -10,6 +10,7 @@
 (ns app.common.geom.shapes
   (:require
    [app.common.data :as d]
+   [app.common.math :as mth]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.common :as gco]
@@ -260,6 +261,13 @@
     {:rotation angle
      :displacement displacement}))
 
+(defn clip-points [bounds points]
+  (let [clip-point (fn [{:keys [x y]}]
+                     (gpt/point (mth/clamp x (:x1 bounds) (:x2 bounds))
+                                (mth/clamp y (:y1 bounds) (:y2 bounds))))]
+    (->> points
+         (map clip-point)))
+  )
 
 ;; EXPORTS
 (d/export gco/center-shape)
@@ -273,6 +281,8 @@
 (d/export gpr/points->selrect)
 (d/export gpr/points->rect)
 (d/export gpr/center->rect)
+(d/export gpr/join-selrects)
+(d/export gpr/intersect-selrects)
 
 (d/export gtr/transform-shape)
 (d/export gtr/transform-matrix)

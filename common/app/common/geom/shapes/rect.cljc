@@ -58,6 +58,20 @@
      :width (- maxx minx)
      :height (- maxy miny)}))
 
+(defn intersect-selrects [selrects]
+  (let [minx (transduce (comp (map :x1) (remove nil?)) max ##-Inf selrects)
+        miny (transduce (comp (map :y1) (remove nil?)) max ##-Inf selrects)
+        maxx (transduce (comp (map :x2) (remove nil?)) min ##Inf selrects)
+        maxy (transduce (comp (map :y2) (remove nil?)) min ##Inf selrects)]
+    {:x minx
+     :y miny
+     :x1 minx
+     :y1 miny
+     :x2 maxx
+     :y2 maxy
+     :width (- maxx minx)
+     :height (- maxy miny)}))
+
 (defn center->rect [center width height]
   (assert (gpt/point center))
   (assert (and (number? width) (> width 0)))
@@ -67,3 +81,4 @@
    :y (- (:y center) (/ height 2))
    :width width
    :height height})
+

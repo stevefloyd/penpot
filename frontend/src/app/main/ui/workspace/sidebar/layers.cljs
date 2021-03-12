@@ -122,7 +122,7 @@
           (if (:blocked item)
             (st/emit! (dw/update-shape-flags id {:blocked false}))
             (st/emit! (dw/update-shape-flags id {:blocked true})
-                      (dw/select-shape id true))))
+                      (dw/deselect-shape id))))
 
         toggle-visibility
         (fn [event]
@@ -144,14 +144,12 @@
               (st/emit! (dw/shift-select-shapes id))
 
               (or (kbd/ctrl? event) (kbd/meta? event))
-              (st/emit! (dw/select-shape id true))
+              (st/emit! (dw/select-shape- id true))
 
               (> (count selected) 1)
-              (st/emit! (dw/deselect-all)
-                        (dw/select-shape id))
+              (st/emit! (dw/select-shape- id))
               :else
-              (st/emit! (dw/deselect-all)
-                        (dw/select-shape id)))))
+              (st/emit! (dw/select-shape- id)))))
 
         on-context-menu
         (fn [event]
@@ -164,8 +162,7 @@
         on-drag
         (fn [{:keys [id]}]
           (when (not (contains? selected id))
-            (st/emit! (dw/deselect-all)
-                      (dw/select-shape id))))
+            (st/emit! (dw/select-shape- id))))
 
         on-drop
         (fn [side {:keys [id] :as data}]

@@ -1378,8 +1378,7 @@
       (let [selected (get-in state [:workspace-local :selected])]
         (rx/concat
           (when-not (selected (:id shape))
-            (rx/of (dws/deselect-all)
-                   (dws/select-shape (:id shape))))
+            (rx/of (dws/select-shape- (:id shape))))
           (rx/of (show-context-menu params)))))))
 
 (def hide-context-menu
@@ -1856,7 +1855,8 @@
 
 ;; Selection
 
-(d/export dws/select-shape)
+(d/export dws/select-shape-)
+(d/export dws/deselect-shape)
 (d/export dws/select-all)
 (d/export dws/deselect-all)
 (d/export dwc/select-shapes)
@@ -1864,7 +1864,7 @@
 (d/export dws/duplicate-selected)
 (d/export dws/handle-selection)
 (d/export dws/select-inside-group)
-(d/export dws/select-last-layer)
+;;(d/export dws/select-last-layer)
 (d/export dwd/select-for-drawing)
 (d/export dwc/clear-edition-mode)
 (d/export dwc/add-shape)

@@ -84,8 +84,10 @@
 
 ;; --- Toggle shape's selection status (selected or deselected)
 
-(defn select-shape
-  ([id] (select-shape id false))
+(defn select-shape-
+  ([id]
+   (select-shape- id false))
+
   ([id toggle?]
    (us/verify ::us/uuid id)
    (ptk/reify ::select-shape
@@ -94,7 +96,7 @@
        (update-in state [:workspace-local :selected]
                   (fn [selected]
                     (if-not toggle?
-                      (conj selected id)
+                      (conj (d/ordered-set) id)
                       (if (contains? selected id)
                         (disj selected id)
                         (conj selected id))))))
@@ -186,6 +188,7 @@
   ([] (deselect-all false))
 
   ([check-modal]
+   (prn "DESELECTALL")
    (ptk/reify ::deselect-all
      ptk/UpdateEvent
      (update [_ state]
@@ -243,9 +246,9 @@
                            reverse
                            (d/seek #(geom/has-point? % position)))]
          (when selected
-           (rx/of (deselect-all) (select-shape (:id selected)))))))))
+           (rx/of (select-shape- (:id selected)))))))))
 
-(defn select-last-layer
+#_(defn select-last-layer
   ([position]
    (ptk/reify ::select-last-layer
      ptk/WatchEvent

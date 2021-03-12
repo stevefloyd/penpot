@@ -17,7 +17,6 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.shapes.group :as group]
    [app.main.ui.shapes.shape :refer [shape-container]]
-   [app.main.ui.workspace.effects :as we]
    [app.util.debug :refer [debug?]]
    [app.util.dom :as dom]
    [rumext.alpha :as mf]))
@@ -63,13 +62,7 @@
             (mf/deref is-mask-selected-ref)
 
             expand-mask? is-child-selected?
-            group-interactions? (not (or @ctrl? is-child-selected?))
-
-            handle-mouse-down (we/use-mouse-down shape)
-            handle-context-menu (we/use-context-menu shape)
-            handle-pointer-enter (we/use-pointer-enter shape)
-            handle-pointer-leave (we/use-pointer-leave shape)
-            handle-double-click (use-double-click shape)]
+            group-interactions? (not (or @ctrl? is-child-selected?))]
 
         (hooks/use-stream ms/keyboard-ctrl #(reset! ctrl? %))
 
@@ -90,10 +83,5 @@
             :transform transform
             :style {:pointer-events (when-not group-interactions? "none")
                     :fill (if (debug? :group) "red" "transparent")
-                    :opacity 0.5}
-            :on-mouse-down handle-mouse-down
-            :on-context-menu handle-context-menu
-            :on-pointer-over handle-pointer-enter
-            :on-pointer-out handle-pointer-leave
-            :on-double-click handle-double-click}]]]))))
+                    :opacity 0.5}}]]]))))
 

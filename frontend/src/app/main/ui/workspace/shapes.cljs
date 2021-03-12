@@ -60,22 +60,23 @@
   [props]
   (let [shape  (obj/get props "shape")
         frame  (obj/get props "frame")
-        ghost? (mf/use-ctx muc/ghost-ctx)
+        ;;ghost? (mf/use-ctx muc/ghost-ctx)
         shape  (-> (geom/transform-shape shape)
                    (geom/translate-to-frame frame))
         opts  #js {:shape shape
                    :frame frame}
 
-        moving-iref (mf/use-memo (mf/deps (:id shape)) (make-is-moving-ref (:id shape)))
-        moving?     (mf/deref moving-iref)
+        ;; moving-iref (mf/use-memo (mf/deps (:id shape)) (make-is-moving-ref (:id shape)))
+        ;; moving?     (mf/deref moving-iref)
         svg-element? (and (= (:type shape) :svg-raw)
                           (not= :svg (get-in shape [:content :tag])))
-        hide-moving? (and (not ghost?) moving?)]
+        ;;hide-moving? (and (not ghost?) moving?)
+        ]
 
     (when (and shape (not (:hidden shape)))
       [:*
        (if-not svg-element?
-         [:g.shape-wrapper {:style {:display (when hide-moving? "none")}}
+         [:g.shape-wrapper #_{:style {:display (when hide-moving? "none")}}
           (case (:type shape)
             :path [:> path/path-wrapper opts]
             :text [:> text/text-wrapper opts]

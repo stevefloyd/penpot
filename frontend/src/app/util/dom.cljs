@@ -272,3 +272,9 @@
     "image/svg+xml" "svg"
     "image/webp"    "webp"
     nil))
+
+(defn set-attribute [^js node ^string attr value]
+  (.setAttribute node attr value))
+
+(defn remove-attribute [^js node ^string attr]
+  (.removeAttribute node attr))

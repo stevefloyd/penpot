@@ -55,29 +55,28 @@
    [goog.events :as events]
    [potok.core :as ptk]
    [promesa.core :as p]
-   [rumext.alpha :as mf])
+   [rumext.alpha :as mf]
+
+   [app.main.ui.context :as muc]
+   [app.common.pages :as cp]
+   [app.main.worker :as uw]
+   )
   (:import goog.events.EventType
            goog.events.WheelEvent
            goog.events.KeyCodes))
 
-(defonce css-mouse?
-  (cfg/check-browser? :firefox))
-
 (defn get-cursor [cursor]
-  (if-not css-mouse?
-    (name cursor)
-
-    (case cursor
-      :hand cur/hand
-      :comments cur/comments
-      :create-artboard cur/create-artboard
-      :create-rectangle cur/create-rectangle
-      :create-ellipse cur/create-ellipse
-      :pen cur/pen
-      :pencil cur/pencil
-      :create-shape cur/create-shape
-      :duplicate cur/duplicate
-      cur/pointer-inner)))
+  (case cursor
+    :hand cur/hand
+    :comments cur/comments
+    :create-artboard cur/create-artboard
+    :create-rectangle cur/create-rectangle
+    :create-ellipse cur/create-ellipse
+    :pen cur/pen
+    :pencil cur/pencil
+    :create-shape cur/create-shape
+    :duplicate cur/duplicate
+    cur/pointer-inner))
 
 ;; --- Coordinates Widget
 
@@ -210,7 +209,6 @@
                    :display (when-not (and @in-viewport? @visible?) "none")}}
      [:use {:xlinkHref (str "#cursor-" cursor)}]]))
 
-;; TODO: revisit the refs usage (vs props)
 (mf/defc shape-outlines
   {::mf/wrap-props false}
   [props]
@@ -262,70 +260,19 @@
            :fill (str "url(#pixel-grid)")
            :style {:pointer-events "none"}}]])
 
-(mf/defc frames
-  {::mf/wrap [mf/memo]
-   ::mf/wrap-props false}
-  [props]
-  (let [hover    (unchecked-get props "hover")
-        selected (unchecked-get props "selected")
-        ids      (unchecked-get props "ids")
-        edition  (unchecked-get props "edition")
-        data     (mf/deref refs/workspace-page)
-        objects  (:objects data)
-        root     (get objects uuid/zero)
-        shapes   (->> (:shapes root)
-                      (map #(get objects %)))
+(defn update-transform [node shapes modifiers]
+  (doseq [{:keys [id type]} shapes]
+    (let [node (dom/get-element (str "shape-" id))
+          node (if (= :frame type) (.-parentNode node) node)]
+      (dom/set-attribute node "transform" (str (:displacement modifiers))))
+    ))
 
-        shapes (if ids
-                 (->> ids (map #(get objects %)))
-                 shapes)]
+(defn remove-transform [node shapes]
+  (doseq [{:keys [id type]} shapes]
+    (let [node (dom/get-element (str "shape-" id))
+          node (if (= :frame type) (.-parentNode node) node)]
+      (dom/remove-attribute node "transform"))))
 
-    [:*
-     [:g.shapes
-      (for [item shapes]
-        (if (= (:type item) :frame)
-          [:& frame-wrapper {:shape item
-                             :key (:id item)
-                             :objects objects}]
-          [:& shape-wrapper {:shape item
-                             :key (:id item)}]))]
-
-     [:& shape-outlines {:objects objects
-                         :selected selected
-                         :hover hover
-                         :edition edition}]]))
-
-(mf/defc ghost-frames
-  {::mf/wrap [mf/memo]
-   ::mf/wrap-props false}
-  [props]
-  (let [modifiers    (obj/get props "modifiers")
-        selected     (obj/get props "selected")
-
-        sobjects     (mf/deref refs/selected-objects)
-        selrect-orig (gsh/selection-rect sobjects)
-
-        xf           (comp
-                      (map #(assoc % :modifiers modifiers))
-                      (map gsh/transform-shape))
-
-        selrect      (->> (into [] xf sobjects)
-                          (gsh/selection-rect))
-
-        transform (when (and (mth/finite? (:x selrect-orig))
-                             (mth/finite? (:y selrect-orig)))
-                    (str/fmt "translate(%s,%s)" (- (:x selrect-orig)) (- (:y selrect-orig))))]
-    [:& (mf/provider ctx/ghost-ctx) {:value true}
-     [:svg.ghost
-      {:x (mth/finite (:x selrect) 0)
-       :y (mth/finite (:y selrect) 0)
-       :width (mth/finite (:width selrect) 100)
-       :height (mth/finite (:height selrect) 100)
-       :style {:pointer-events "none"}}
-
-      [:g {:transform transform}
-       [:& frames
-        {:ids selected}]]]]))
 
 (defn format-viewbox [vbox]
   (str/join " " [(+ (:x vbox 0) (:left-offset vbox 0))
@@ -348,7 +295,7 @@
                 panning
                 picking-color?
                 transform
-                hover
+                ;;hover
                 modifiers
                 selrect
                 show-distances?]} local
@@ -368,11 +315,15 @@
         disable-paste (mf/use-var false)
         in-viewport?  (mf/use-var false)
 
+        render-ref    (mf/use-ref nil)
+
         drawing       (mf/deref refs/workspace-drawing)
         drawing-tool  (:tool drawing)
         drawing-obj   (:object drawing)
         drawing-path? (and edition (= :draw (get-in edit-path [edition :edit-mode])))
         zoom          (or zoom 1)
+
+        hover         (mf/use-state nil)
 
         show-grids?          (contains? layout :display-grid)
         show-snap-points?    (and (contains? layout :dynamic-alignment)
@@ -383,32 +334,75 @@
 
         on-mouse-down
         (mf/use-callback
-         (mf/deps drawing-tool edition)
+         (mf/deps @hover drawing-tool edition selected)
          (fn [event]
            (dom/stop-propagation event)
-           (let [event (.-nativeEvent event)
-                 ctrl? (kbd/ctrl? event)
+           (let [event  (.-nativeEvent event)
+
+                 ctrl?  (kbd/ctrl? event)
+                 shift? (kbd/shift? event)
+                 alt?   (kbd/alt? event)
+
+                 left-click?   (= 1 (.-which event))
+                 middle-click? (= 2 (.-which event))
+                 
+                 {:keys [id blocked type] :as shape} @hover
+                 frame? (= :frame type)
+                 selected? (contains? selected id)]
+
+             (when middle-click?
+               (handle-viewport-positioning viewport-ref))
+
+             (when left-click?
+               (st/emit! (ms/->MouseEvent :down ctrl? shift? alt?))
+
+               (cond
+                 (and drawing-tool (not (#{:comments :path} drawing-tool)))
+                 (st/emit! (dd/start-drawing drawing-tool))
+
+                 (or (not shape) (and frame? (not selected?)))
+                 (st/emit! (dw/handle-selection shift?))
+
+
+                 :else
+                 (st/emit! (when (or shift? (not selected?))
+                             (dw/select-shape- id shift?))
+                           (when (not shift?)
+                             (dw/start-move-selected))))))))
+
+        on-click
+        (mf/use-callback
+         (mf/deps @hover)
+         (fn [event]
+           (let [ctrl? (kbd/ctrl? event)
                  shift? (kbd/shift? event)
                  alt? (kbd/alt? event)]
-             (when (= 1 (.-which event))
-               (st/emit! (ms/->MouseEvent :down ctrl? shift? alt?)))
+             (st/emit! (ms/->MouseEvent :click ctrl? shift? alt?)))))
 
-             (cond
-               (and (= 1 (.-which event)) (not edition))
-               (if drawing-tool
-                 (when (not (#{:comments :path} drawing-tool))
-                   (st/emit! (dd/start-drawing drawing-tool)))
-                 (st/emit! (dw/handle-selection shift?)))
+        on-double-click
+        (mf/use-callback
+         (mf/deps @hover)
+         (fn [event]
+           (dom/stop-propagation event)
+           (let [ctrl? (kbd/ctrl? event)
+                 shift? (kbd/shift? event)
+                 alt? (kbd/alt? event)
+                 {:keys [id type] :as shape} @hover
+                 frame? (= :frame type)]
 
-               (and (= 2 (.-which event)))
-               (handle-viewport-positioning viewport-ref)))))
+             (st/emit! (ms/->MouseEvent :double-click ctrl? shift? alt?))
+             (when (and shape frame?)
+               (st/emit! (dw/select-shape- id shift?))))))
+
 
         on-context-menu
         (mf/use-callback
+         (mf/deps (:id @hover))
          (fn [event]
            (dom/prevent-default event)
            (let [position (dom/get-client-position event)]
-             (st/emit! (dw/show-context-menu {:position position})))))
+             (st/emit! (dw/show-context-menu {:position position
+                                              :shape @hover})))))
 
         on-mouse-up
         (mf/use-callback
@@ -446,24 +440,6 @@
            (let [target (dom/get-target event)]
              ; Release pointer on mouse up
              (.releasePointerCapture target (.-pointerId event)))))
-
-        on-click
-        (mf/use-callback
-         (fn [event]
-           (let [ctrl? (kbd/ctrl? event)
-                 shift? (kbd/shift? event)
-                 alt? (kbd/alt? event)]
-             (st/emit! (ms/->MouseEvent :click ctrl? shift? alt?)))))
-
-        on-double-click
-        (mf/use-callback
-         (mf/deps drawing-path?)
-         (fn [event]
-           (dom/stop-propagation event)
-           (let [ctrl? (kbd/ctrl? event)
-                 shift? (kbd/shift? event)
-                 alt? (kbd/alt? event)]
-             (st/emit! (ms/->MouseEvent :double-click ctrl? shift? alt?)))))
 
         on-key-down
         (mf/use-callback
@@ -535,6 +511,27 @@
                                           (kbd/ctrl? event)
                                           (kbd/shift? event)
                                           (kbd/alt? event))))))
+
+        move-stream (mf/use-memo #(rx/subject))
+        modifiers-stream (mf/use-memo #(rx/subject))
+
+        query-point (fn [point stream]
+                      (let [rect (gsh/center->rect point 1 1)]
+                        (->> (uw/ask! {:cmd :selection/query
+                                       :page-id page-id
+                                       :rect rect
+                                       :include-frames? true
+                                       ;;:include-groups? false
+                                       }))))
+
+        over-shapes-stream (->> move-stream (rx/switch-map query-point))
+
+        on-pointer-move
+        (mf/use-callback
+         (fn [event]
+           (let [raw-pt (dom/get-client-position event)
+                 pt     (translate-point-to-viewport raw-pt)]
+             (rx/push! move-stream pt))))
 
         on-mouse-wheel
         (mf/use-callback
@@ -684,7 +681,14 @@
              ;; We schedule the event so it fires after `initialize-page` event
              (timers/schedule #(st/emit! (dw/update-viewport-size size))))))
 
-        options (mf/deref refs/workspace-page-options)]
+        options (mf/deref refs/workspace-page-options)
+
+        {:keys [objects]} (mf/deref refs/workspace-page)
+        shapes (->> (get-in objects [uuid/zero :shapes])
+                    (mapv #(get objects %)))
+
+        roots (mf/use-memo (mf/deps selected) #(cp/remove-children objects selected-objects))
+        ]
 
     (mf/use-layout-effect
      (fn []
@@ -736,13 +740,30 @@
     (mf/use-layout-effect (mf/deps layout) on-resize)
     (hooks/use-stream ms/keyboard-alt #(reset! alt? %))
 
+    (hooks/use-stream
+     over-shapes-stream
+     (mf/deps objects transform)
+     (fn [ids]
+       (when (not transform)
+         (reset! hover (get objects (first ids))))))
+
+    (mf/use-effect
+     (mf/deps modifiers)
+     #(rx/push! modifiers-stream modifiers))
+
+    (hooks/use-stream
+     modifiers-stream
+     (mf/deps selected)
+     (fn [modifiers]
+       (let [roots (cp/remove-children objects selected-objects)
+             render-node (mf/ref-val render-ref)]
+         (if modifiers
+           (update-transform render-node roots modifiers)
+           (remove-transform render-node roots)))
+       ))
+
     [:*
-     (when picking-color?
-       [:& pixel-overlay {:vport vport
-                          :vbox vbox
-                          :viewport @viewport-node
-                          :options options
-                          :layout layout}])
+     
 
      (when (= drawing-tool :comments)
        [:& comments-layer {:vbox vbox
@@ -752,96 +773,124 @@
                            :page-id page-id
                            :file-id (:id file)}])
 
-     (when-not css-mouse?
-       [:& render-cursor {:viewport @viewport-node
-                          :cursor @cursor}])
+     [:div.viewport {:style {:position "relative"}}
+      (when picking-color?
+        [:& pixel-overlay {:vport vport
+                           :vbox vbox
+                           :viewport @viewport-node
+                           :options options
+                           :layout layout}])
+      [:svg.render-shapes
+       {:id "render"
+        :ref render-ref
+        :xmlns      "http://www.w3.org/2000/svg"
+        :xmlnsXlink "http://www.w3.org/1999/xlink"
+        :preserveAspectRatio "xMidYMid meet"
+        :key (str "render" page-id)
+        :width (:width vport 0)
+        :height (:height vport 0)
+        :view-box (format-viewbox vbox)
+        :style {:position "absolute"
+                :background-color (get options :background "#E8E9EA")}}
 
-     [:svg.viewport
-      {:xmlns      "http://www.w3.org/2000/svg"
-       :xmlnsXlink "http://www.w3.org/1999/xlink"
-       :preserveAspectRatio "xMidYMid meet"
-       :key page-id
-       :width (:width vport 0)
-       :height (:height vport 0)
-       :view-box (format-viewbox vbox)
-       :ref #(do (mf/set-ref-val! viewport-ref %)
-                 (reset! viewport-node %))
-       :class (when drawing-tool "drawing")
-       :style {:cursor (when css-mouse? @cursor)
-               :background-color (get options :background "#E8E9EA")}
-       :on-context-menu on-context-menu
-       :on-click on-click
-       :on-double-click on-double-click
-       :on-mouse-down on-mouse-down
-       :on-mouse-up on-mouse-up
-       :on-pointer-down on-pointer-down
-       :on-pointer-up on-pointer-up
-       :on-pointer-enter #(reset! in-viewport? true)
-       :on-pointer-leave #(reset! in-viewport? false)
-       :on-drag-enter on-drag-enter
-       :on-drag-over on-drag-over
-       :on-drop on-drop}
+       [:& (mf/provider muc/embed-ctx) {:value true}
+        [:g.shapes
+         (for [item shapes]
+           (if (= (:type item) :frame)
+             [:& frame-wrapper {:shape item
+                                :key (:id item)
+                                :objects objects}]
 
-      [:g {:style {:pointer-events (if (contains? layout :comments)
-                                     "none"
-                                     "auto")}}
-       [:& frames {:key page-id
-                   :hover hover
-                   :selected selected
-                   :edition edition}]
+             [:& shape-wrapper {:shape item
+                                :key (:id item)}]))]]]
 
-       [:g {:style {:display (when (not= :move transform) "none")}}
-        [:& ghost-frames {:modifiers modifiers
-                          :selected selected}]]
+      [:svg
+       {:xmlns      "http://www.w3.org/2000/svg"
+        :xmlnsXlink "http://www.w3.org/1999/xlink"
+        :preserveAspectRatio "xMidYMid meet"
+        :key (str "viewport" page-id)
+        :width (:width vport 0)
+        :height (:height vport 0)
+        :view-box (format-viewbox vbox)
+        :ref #(do (mf/set-ref-val! viewport-ref %)
+                  (reset! viewport-node %))
+        :class (when drawing-tool "drawing")
+        :style {:cursor @cursor
+                :position "absolute"}
 
-       (when (seq selected)
-         [:& selection-handlers {:selected selected
-                                 :zoom zoom
-                                 :edition edition
-                                 :show-distances (and (not transform) show-distances?)
-                                 :disable-handlers (or drawing-tool edition)}])
+        :on-pointer-move on-pointer-move
 
-       (when (= (count selected) 1)
-         [:& gradient-handlers {:id (first selected)
-                                :zoom zoom}])
+        :on-context-menu on-context-menu
+        :on-click on-click
+        :on-double-click on-double-click
+        :on-mouse-down on-mouse-down
+        :on-mouse-up on-mouse-up
+        :on-pointer-down on-pointer-down
+        :on-pointer-up on-pointer-up
+        :on-pointer-enter #(reset! in-viewport? true)
+        :on-pointer-leave #(reset! in-viewport? false)
+        :on-drag-enter on-drag-enter
+        :on-drag-over on-drag-over
+        :on-drop on-drop}
 
-       (when drawing-obj
-         [:& draw-area {:shape drawing-obj
-                        :zoom zoom
-                        :tool drawing-tool
-                        :modifiers modifiers}])
+       [:g {:style {:pointer-events (if (contains? layout :comments)
+                                      "none"
+                                      "auto")}}
 
-       (when show-grids?
-         [:& frame-grid {:zoom zoom}])
+        [:& shape-outlines {:objects objects
+                            :selected selected
+                            :hover (when (not= :frame (:type @hover))
+                                     #{(:id @hover)})
+                            :edition edition}]
+        
+        (when (seq selected)
+          [:& selection-handlers {:selected selected
+                                  :zoom zoom
+                                  :edition edition
+                                  :show-distances (and (not transform) show-distances?)
+                                  :disable-handlers (or drawing-tool edition)}])
 
-       (when (>= zoom 8)
-         [:& pixel-grid {:vbox vbox
-                         :zoom zoom}])
+        (when (= (count selected) 1)
+          [:& gradient-handlers {:id (first selected)
+                                 :zoom zoom}])
 
-       (when show-snap-points?
-         [:& snap-points {:layout layout
-                          :transform transform
-                          :drawing drawing-obj
-                          :zoom zoom
-                          :page-id page-id
-                          :selected selected
-                          :modifiers modifiers}])
+        (when drawing-obj
+          [:& draw-area {:shape drawing-obj
+                         :zoom zoom
+                         :tool drawing-tool
+                         :modifiers modifiers}])
 
-       (when show-snap-distance?
-         [:& snap-distances {:layout layout
-                             :zoom zoom
-                             :transform transform
-                             :selected selected
-                             :page-id page-id}])
+        (when show-grids?
+          [:& frame-grid {:zoom zoom}])
 
-       (when tooltip
-         [:& cursor-tooltip {:zoom zoom :tooltip tooltip}])]
+        (when (>= zoom 8)
+          [:& pixel-grid {:vbox vbox
+                          :zoom zoom}])
 
-      [:& presence/active-cursors {:page-id page-id}]
-      [:& selection-rect {:data selrect}]
+        (when show-snap-points?
+          [:& snap-points {:layout layout
+                           :transform transform
+                           :drawing drawing-obj
+                           :zoom zoom
+                           :page-id page-id
+                           :selected selected
+                           :modifiers modifiers}])
 
-      (when (= options-mode :prototype)
-        [:& interactions {:selected selected}])]]))
+        (when show-snap-distance?
+          [:& snap-distances {:layout layout
+                              :zoom zoom
+                              :transform transform
+                              :selected selected
+                              :page-id page-id}])
+
+        (when tooltip
+          [:& cursor-tooltip {:zoom zoom :tooltip tooltip}])]
+
+       [:& presence/active-cursors {:page-id page-id}]
+       [:& selection-rect {:data selrect}]
+
+       (when (= options-mode :prototype)
+         [:& interactions {:selected selected}])]]]))
 
 
 (mf/defc viewport-actions

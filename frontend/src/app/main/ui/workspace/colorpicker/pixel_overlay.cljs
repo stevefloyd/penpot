@@ -133,7 +133,7 @@
          (mf/deps img-ref)
          (fn []
            (let [img-node (mf/ref-val img-ref)
-                 svg-node (mf/ref-val svg-ref)
+                 svg-node #_(mf/ref-val svg-ref) (dom/get-element "render")
                  xml  (-> (js/XMLSerializer.)
                           (.serializeToString svg-node)
                           js/encodeURIComponent
@@ -160,20 +160,21 @@
          #(rx/dispose! sub))))
 
     (mf/use-effect
-     (mf/deps svg-ref)
+     #_(mf/deps svg-ref)
      (fn []
-       (when svg-ref
-         (let [config #js {:attributes true
-                           :childList true
-                           :subtree true
-                           :characterData true}
-               svg-node (mf/ref-val svg-ref)
-               observer (js/MutationObserver. handle-svg-change)]
-           (.observe observer svg-node config)
-           (handle-svg-change)
+       (let [config #js {:attributes true
+                         :childList true
+                         :subtree true
+                         :characterData true}
+             svg-node #_(mf/ref-val svg-ref) (dom/get-element "render")
+             observer (js/MutationObserver. handle-svg-change)
+             ]
+         (.observe observer svg-node config)
+         (handle-svg-change)
 
-           ;; Disconnect on unmount
-           #(.disconnect observer)))))
+         ;; Disconnect on unmount
+         #(.disconnect observer)
+         )))
 
     [:*
      [:div.overlay
@@ -183,7 +184,8 @@
                :left 0
                :width "100%"
                :height "100%"
-               :cursor cur/picker}
+               :cursor cur/picker
+               :z-index 1}
        :on-mouse-down handle-mouse-down-picker
        :on-mouse-up handle-mouse-up-picker
        :on-mouse-move handle-mouse-move-picker}
@@ -200,7 +202,7 @@
                          :width "100%"
                          :height "100%"}}]
 
-       [:& (mf/provider muc/embed-ctx) {:value true}
+       #_[:& (mf/provider muc/embed-ctx) {:value true}
         [:svg.viewport
          {:ref svg-ref
           :preserveAspectRatio "xMidYMid meet"
