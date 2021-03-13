@@ -1,6 +1,6 @@
 // Frontend configuration
 
-//var penpotPublicURI = "https://penpot.example.com";
+//var penpotPublicURI = "https://design.floyds.io";
 //var penpotDemoWarning = <true|false>;
 //var penpotAllowDemoUsers = <true|false>;
 //var penpotGoogleClientID = "<google-client-id-here>";
