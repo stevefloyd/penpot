@@ -35,7 +35,7 @@ services:
     environment:
       # Should be set to the public domain when penpot is going to be
       # served.
-      - PENPOT_PUBLIC_URI=http://localhost:9001
+      - PENPOT_PUBLIC_URI=http://design.floyds.io:9001
 
       # Standard database connection parametes (only postgresql is supported):
       - PENPOT_DATABASE_URI=postgresql://penpot-postgres/penpot
